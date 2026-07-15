@@ -1,10 +1,3 @@
-"""Asistente conversacional de Kywi basado exclusivamente en el CSV mejorado.
-
-La recuperación de productos es determinista: primero filtra Tipo Producto,
-después marca, presupuesto y uso. Los modelos no agregan nombres, precios,
-existencias ni políticas a la respuesta comercial.
-"""
-
 from __future__ import annotations
 
 import json
@@ -161,6 +154,11 @@ modelos: EstadoModelos | None = None
 
 
 def normalizar(texto: str) -> str:
+    """
+    Convierte el texto a minúsculas, elimina tildes y caracteres especiales.
+    Se utiliza para asegurar que las comparaciones de palabras (ej. "Taladro" vs "taladro")
+    coincidan perfectamente sin importar cómo escriba el usuario.
+    """
     texto = str(texto or "").lower().strip()
     texto = "".join(
         c
@@ -172,6 +170,11 @@ def normalizar(texto: str) -> str:
 
 
 def cargar_catalogo() -> None:
+    """
+    Lee y valida los archivos de datos (CSV de productos y TXT de políticas).
+    Construye las matrices matemáticas (TF-IDF) que permitirán buscar
+    productos y tipos de productos por similitud de texto más adelante.
+    """
     global catalogo, politicas
     global vectorizador_productos, matriz_productos
     global vectorizador_tipos, matriz_tipos, tabla_tipos
@@ -185,6 +188,7 @@ def cargar_catalogo() -> None:
             f"No se encontró {POLITICAS_PATH.name} junto a la aplicación."
         )
 
+    # Carga del DataFrame
     catalogo = pd.read_csv(
         CATALOGO_PATH,
         sep=";",
@@ -212,6 +216,7 @@ def cargar_catalogo() -> None:
     catalogo["marca_norm"] = catalogo["Marca"].map(normalizar)
     catalogo["principal"] = catalogo["Es Producto Principal"].map(normalizar).eq("si")
 
+    # Preparación del TF-IDF para buscar productos específicos
     corpus = catalogo.apply(
         lambda fila: " ".join(
             [
@@ -228,6 +233,7 @@ def cargar_catalogo() -> None:
     vectorizador_productos = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
     matriz_productos = vectorizador_productos.fit_transform(corpus)
 
+    # Agrupación de datos para buscar el 'Tipo' general (ej. si pide "herramienta")
     tipos = []
     for tipo, grupo in catalogo.groupby("Tipo Producto", sort=True):
         ejemplos = " ".join(grupo["Nombre Producto"].head(4).astype(str))
@@ -255,6 +261,10 @@ def cargar_catalogo() -> None:
 
 
 def iniciar_modelos() -> EstadoModelos:
+    """
+    Descarga y carga en memoria (CPU o GPU) los 5 pipelines de Hugging Face.
+    Se encapsulan de manera segura para evitar errores de memoria en entornos como Kaggle/Colab.
+    """
     global modelos
     if modelos is not None:
         return modelos
@@ -320,6 +330,10 @@ def iniciar_modelos() -> EstadoModelos:
 
 
 def interpretar_sentimiento(resultado: dict[str, Any]) -> tuple[str, float, bool]:
+    """
+    Traduce la salida cruda del modelo de sentimiento (ej. 'NEG') a un formato amigable ('negativo').
+    Retorna también un booleano (True/False) indicando si el cliente está marcadamente molesto.
+    """
     etiqueta = str(resultado.get("label", "NEU")).upper()
     confianza = float(resultado.get("score", 0.0))
     mapa = {
@@ -335,6 +349,11 @@ def interpretar_sentimiento(resultado: dict[str, Any]) -> tuple[str, float, bool
 
 
 def detectar_intencion(pregunta: str) -> tuple[str, float]:
+    """
+    Identifica qué quiere hacer el usuario (comprar, reclamar, preguntar).
+    Usa primero palabras clave rápidas (reglas heurísticas). Si no encuentra coincidencias,
+    delegan el trabajo al pipeline NLP 'zero-shot-classification'.
+    """
     assert modelos is not None
     consulta = normalizar(pregunta)
     reglas = [
@@ -364,6 +383,10 @@ def detectar_intencion(pregunta: str) -> tuple[str, float]:
 
 
 def limpiar_para_tipo(texto: str) -> str:
+    """
+    Remueve palabras comunes ('el', 'la', 'busco') y nombres de marcas del texto.
+    Esto permite que el modelo se enfoque únicamente en el tipo de producto (ej. "Taladro").
+    """
     consulta = normalizar(texto)
     if catalogo is not None:
         marcas = sorted(set(catalogo["marca_norm"]), key=len, reverse=True)
@@ -379,6 +402,7 @@ def limpiar_para_tipo(texto: str) -> str:
 
 
 def variantes_tipo(tipo: str) -> set[str]:
+    """Genera versiones singulares y plurales de una palabra para la búsqueda exacta."""
     normalizado = normalizar(tipo)
     variantes = {normalizado}
     if " " not in normalizado:
@@ -394,6 +418,10 @@ def variantes_tipo(tipo: str) -> set[str]:
 
 
 def detectar_tipo_producto(texto: str) -> tuple[str | None, float]:
+    """
+    Intenta identificar el tipo de producto que el usuario busca (ej. Aspiradora).
+    Primero busca coincidencias exactas. Si falla, usa TF-IDF (similitud) para inferirlo.
+    """
     assert tabla_tipos is not None and vectorizador_tipos is not None
     consulta = limpiar_para_tipo(texto)
     if not consulta:
@@ -419,6 +447,7 @@ def detectar_tipo_producto(texto: str) -> tuple[str | None, float]:
 
 
 def candidatos_del_tipo(tipo: str | None) -> pd.DataFrame:
+    """Filtra el catálogo devolviendo solo las filas correspondientes al 'Tipo' solicitado."""
     assert catalogo is not None
     if not tipo:
         return catalogo.iloc[0:0].copy()
@@ -428,6 +457,7 @@ def candidatos_del_tipo(tipo: str | None) -> pd.DataFrame:
 
 
 def marcas_disponibles(tipo: str | None, limite: int = 8) -> list[str]:
+    """Devuelve una lista de las marcas que sí existen para un tipo de producto específico."""
     candidatos = candidatos_del_tipo(tipo)
     if candidatos.empty:
         return []
@@ -437,6 +467,7 @@ def marcas_disponibles(tipo: str | None, limite: int = 8) -> list[str]:
 
 
 def detectar_marca_global(texto: str) -> str | None:
+    """Busca si el usuario mencionó alguna marca conocida en toda la base de datos."""
     assert catalogo is not None
     consulta = normalizar(texto)
     marcas = sorted(
@@ -450,6 +481,7 @@ def detectar_marca_global(texto: str) -> str | None:
 
 
 def detectar_marca_del_tipo(texto: str, tipo: str | None) -> str | None:
+    """Verifica si la marca mencionada por el usuario es válida para el producto que pidió."""
     consulta = normalizar(texto)
     for marca in sorted(
         marcas_disponibles(tipo, limite=100),
@@ -463,6 +495,7 @@ def detectar_marca_del_tipo(texto: str, tipo: str | None) -> str | None:
 
 
 def detectar_presupuesto(texto: str) -> float | None:
+    """Usa expresiones regulares (Regex) para extraer el monto de dinero mencionado."""
     texto_original = str(texto or "").lower().replace(",", ".")
     con_simbolo = re.search(r"\$\s*(\d+(?:\.\d+)?)", texto_original)
     if con_simbolo:
@@ -481,6 +514,7 @@ def detectar_presupuesto(texto: str) -> float | None:
 
 
 def detectar_uso(texto: str) -> str | None:
+    """Clasifica el requerimiento del usuario según su nivel de uso (profesional, hogar)."""
     consulta = normalizar(texto)
     usos = {
         "uso profesional": ["profesional", "trabajo diario", "intensivo"],
@@ -495,11 +529,13 @@ def detectar_uso(texto: str) -> str | None:
 
 
 def contiene_respuesta(texto: str, opciones: set[str]) -> bool:
+    """Verifica si el usuario usó frases como 'sin preferencia' o 'no importa'."""
     consulta = normalizar(texto)
     return any(normalizar(opcion) in consulta for opcion in opciones)
 
 
 def estado_nuevo() -> dict[str, Any]:
+    """Retorna la estructura de datos limpia para iniciar una nueva conversación."""
     return {
         "pregunta_inicial": "",
         "intencion": "",
@@ -519,6 +555,10 @@ def estado_nuevo() -> dict[str, Any]:
 
 
 def siguiente_pregunta(estado: dict[str, Any]) -> str | None:
+    """
+    Lógica proactiva: Revisa qué información (filtros) falta en el 'estado' actual
+    y devuelve la pregunta exacta que el bot debe hacerle al usuario.
+    """
     if not estado.get("tipo_producto"):
         estado["pregunta_pendiente"] = "tipo"
         ejemplos = [
@@ -542,10 +582,7 @@ def siguiente_pregunta(estado: dict[str, Any]) -> str | None:
         opciones = (
             f" Las marcas disponibles son: {', '.join(marcas)}." if marcas else ""
         )
-        return (
-            f"¿Qué marca prefieres para **{estado['tipo_producto']}**?"
-            f"{opciones} También puedes responder **sin preferencia**."
-        )
+        return f"¿Qué marca prefieres para **{estado['tipo_producto']}**?{opciones} También puedes responder **sin preferencia**."
 
     if not estado.get("presupuesto_definido"):
         estado["pregunta_pendiente"] = "presupuesto"
@@ -563,6 +600,7 @@ def siguiente_pregunta(estado: dict[str, Any]) -> str | None:
 
 
 def registrar_seguimiento(mensaje: str, estado: dict[str, Any]) -> tuple[bool, str]:
+    """Guarda en la memoria del bot la respuesta ingresada por el usuario al filtro solicitado."""
     pendiente = estado.get("pregunta_pendiente")
     if pendiente == "tipo":
         tipo, confianza = detectar_tipo_producto(mensaje)
@@ -586,9 +624,7 @@ def registrar_seguimiento(mensaje: str, estado: dict[str, Any]) -> tuple[bool, s
             disponibles = marcas_disponibles(estado.get("tipo_producto"))
             return (
                 False,
-                f"No encontré **{estado['tipo_producto']}** de marca **{solicitada}**. "
-                f"Las marcas disponibles son: {', '.join(disponibles)}. "
-                "Elige una o responde **sin preferencia**.",
+                f"No encontré **{estado['tipo_producto']}** de marca **{solicitada}**. Las marcas disponibles son: {', '.join(disponibles)}. Elige una o responde **sin preferencia**.",
             )
         estado["marca"] = marca
         estado["marca_definida"] = True
@@ -614,6 +650,7 @@ def registrar_seguimiento(mensaje: str, estado: dict[str, Any]) -> tuple[bool, s
 
 
 def extraer_politica(titulo: str) -> str:
+    """Busca en el archivo TXT la sección correspondiente a garantías, envíos, etc."""
     patron = rf"{re.escape(titulo)}\n(.*?)(?=\n[A-ZÁÉÍÓÚÑ ]+\n|\nFUENTES OFICIALES|\Z)"
     coincidencia = re.search(patron, politicas, flags=re.DOTALL)
     return (
@@ -624,6 +661,11 @@ def extraer_politica(titulo: str) -> str:
 
 
 def buscar_segun_estado(estado: dict[str, Any]) -> tuple[pd.DataFrame, float]:
+    """
+    Aplica todos los filtros Pandas recopilados (presupuesto, marca, etc.) y
+    ordena el Dataframe resultante midiendo la similitud matemática (Coseno)
+    con la consulta original.
+    """
     assert vectorizador_productos is not None
     candidatos = candidatos_del_tipo(estado.get("tipo_producto"))
     if estado.get("marca"):
@@ -649,6 +691,7 @@ def buscar_segun_estado(estado: dict[str, Any]) -> tuple[pd.DataFrame, float]:
         palabra in normalizar(estado.get("pregunta_inicial", ""))
         for palabra in ["economico", "economica", "barato", "barata"]
     )
+
     if economico or estado.get("intencion") == "precio y presupuesto":
         candidatos = candidatos.sort_values(
             ["precio_num", "similitud"], ascending=[True, False]
@@ -661,6 +704,7 @@ def buscar_segun_estado(estado: dict[str, Any]) -> tuple[pd.DataFrame, float]:
 
 
 def tabla_salida(productos: pd.DataFrame) -> pd.DataFrame:
+    """Limpia y formatea el DataFrame para mostrarlo bonito en la tabla UI de Gradio."""
     columnas = ["Producto", "Marca", "Tipo", "Precio USD", "Disponibilidad", "Enlace"]
     if productos.empty:
         return pd.DataFrame(columns=columnas)
@@ -680,13 +724,17 @@ def tabla_salida(productos: pd.DataFrame) -> pd.DataFrame:
 
 
 def alternativas_por_marca(tipo: str | None, minimo: int = 2) -> list[str]:
+    """Si no hay suficientes productos de una marca, sugiere otras marcas con stock."""
     candidatos = candidatos_del_tipo(tipo)
     conteos = candidatos.groupby("Marca").size().sort_values(ascending=False)
     return conteos[conteos >= minimo].head(6).index.tolist()
 
 
 def ejecutar_auxiliares(pregunta: str, productos: pd.DataFrame) -> dict[str, Any]:
-    """Ejecuta QA, resumen y generación sin publicar hechos generados."""
+    """
+    Ejecuta QA, resumen y generación puramente para registros (logs).
+    No influye en la respuesta que ve el cliente, garantizando 0 alucinaciones.
+    """
     assert modelos is not None
     if productos.empty:
         return {
@@ -736,6 +784,10 @@ def ejecutar_auxiliares(pregunta: str, productos: pd.DataFrame) -> dict[str, Any
 
 
 def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFrame, str]:
+    """
+    Construye el texto final que recibe el cliente y define si requiere ayuda humana.
+    Se alimenta directamente de los datos recuperados por buscar_segun_estado.
+    """
     productos, similitud = buscar_segun_estado(estado)
     tipo = estado.get("tipo_producto")
     marca = estado.get("marca")
@@ -755,28 +807,15 @@ def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFram
         marcas = marcas_disponibles(tipo)
         rango = ""
         if not base.empty:
-            rango = (
-                f" Los precios registrados para este tipo van de "
-                f"${base['precio_num'].min():.2f} a ${base['precio_num'].max():.2f}."
-            )
-        texto = (
-            f"**Criterios usados:** {'; '.join(criterios)}.\n\n"
-            f"No encontré productos que cumplan esa combinación. "
-            f"Las marcas disponibles para **{tipo}** son: {', '.join(marcas)}.{rango} "
-            "No ampliaré la búsqueda a otros artículos."
-        )
+            rango = f" Los precios registrados para este tipo van de ${base['precio_num'].min():.2f} a ${base['precio_num'].max():.2f}."
+        texto = f"**Criterios usados:** {'; '.join(criterios)}.\n\nNo encontré productos que cumplan esa combinación. Las marcas disponibles para **{tipo}** son: {', '.join(marcas)}.{rango} No ampliaré la búsqueda a otros artículos."
         return texto, tabla_salida(productos), "No: puedes cambiar marca o presupuesto"
 
     intencion = estado.get("intencion")
     if intencion == "comparación de productos" and len(productos) < 2:
         opciones = alternativas_por_marca(tipo)
         unico = productos.iloc[0]
-        texto = (
-            f"**Criterios usados:** {'; '.join(criterios)}.\n\n"
-            f"Solo encontré un producto que cumple los filtros: "
-            f"**{unico['Nombre Producto']}** por **${unico['precio_num']:.2f}**. "
-            "No puedo inventar un segundo producto para compararlo."
-        )
+        texto = f"**Criterios usados:** {'; '.join(criterios)}.\n\nSolo encontré un producto que cumple los filtros: **{unico['Nombre Producto']}** por **${unico['precio_num']:.2f}**. No puedo inventar un segundo producto para compararlo."
         if opciones:
             texto += f" Para comparar dos, prueba con: {', '.join(opciones)} o sin preferencia de marca."
         return (
@@ -800,8 +839,7 @@ def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFram
         lineas.append("Estas son las coincidencias reales del catálogo:")
     for _, fila in seleccionados.iterrows():
         lineas.append(
-            f"- **{fila['Nombre Producto']}** — **${fila['precio_num']:.2f}**. "
-            f"Marca: {fila['Marca']}. Disponibilidad registrada: {fila['Disponibilidad']}."
+            f"- **{fila['Nombre Producto']}** — **${fila['precio_num']:.2f}**. Marca: {fila['Marca']}. Disponibilidad registrada: {fila['Disponibilidad']}."
         )
     if intencion == "comparación de productos":
         lineas.append(
@@ -816,8 +854,7 @@ def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFram
     if requiere_humano:
         escalamiento = "Sí: requiere verificar información operativa actual"
         lineas.append(
-            "**Escalamiento:** confirma stock de tienda, pedidos o estado físico con Kywi "
-            "al 1700 150 150 o WhatsApp +593 99 515 5150."
+            "**Escalamiento:** confirma stock de tienda, pedidos o estado físico con Kywi al 1700 150 150 o WhatsApp +593 99 515 5150."
         )
 
     auxiliares = ejecutar_auxiliares(estado.get("pregunta_inicial", ""), seleccionados)
@@ -837,6 +874,7 @@ def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFram
 
 
 def respuesta_politica(estado: dict[str, Any]) -> tuple[str, pd.DataFrame, str]:
+    """Genera la respuesta informativa si la consulta no es de productos (ej. garantías, pagos)."""
     intencion = estado["intencion"]
     titulo = POLITICAS_POR_INTENCION.get(intencion)
     if not titulo:
@@ -847,10 +885,7 @@ def respuesta_politica(estado: dict[str, Any]) -> tuple[str, pd.DataFrame, str]:
         estado["pregunta_inicial"]
     )
     if requiere:
-        texto += (
-            "\n\n**Escalamiento:** comunícate con Kywi al 1700 150 150 o "
-            "WhatsApp +593 99 515 5150."
-        )
+        texto += "\n\n**Escalamiento:** comunícate con Kywi al 1700 150 150 o WhatsApp +593 99 515 5150."
     return texto, tabla_salida(pd.DataFrame()), "Sí" if requiere else "No"
 
 
@@ -859,15 +894,12 @@ def conversar(
     historial: list[dict[str, str]] | None,
     estado: dict[str, Any] | None,
     tono: str,
-) -> tuple[
-    list[dict[str, str]],
-    dict[str, Any],
-    str,
-    str,
-    str,
-    pd.DataFrame,
-    str,
-]:
+) -> tuple[list[dict[str, str]], dict[str, Any], str, str, str, pd.DataFrame, str]:
+    """
+    Función orquestadora que se conecta directamente a la interfaz (Gradio).
+    Se encarga de evaluar si la conversación recién empieza o si ya estamos
+    en medio de un flujo respondiendo a preguntas (ej. el presupuesto).
+    """
     historial = list(historial or [])
     mensaje = str(mensaje or "").strip()
     if not mensaje:
@@ -889,7 +921,9 @@ def conversar(
     primer_turno = (
         not estado or not estado.get("pregunta_inicial") or estado.get("finalizado")
     )
+
     if primer_turno:
+        # Se crean las variables del estado conversacional por primera vez
         estado = estado_nuevo()
         estado["pregunta_inicial"] = mensaje
         intencion, confianza = detectar_intencion(mensaje)
@@ -907,6 +941,7 @@ def conversar(
         )
 
         if intencion not in INTENCIONES_PRODUCTO:
+            # Si el cliente solo pregunta una regla general, se ignora el buscador de productos
             respuesta, productos, escalamiento = respuesta_politica(estado)
             if molesto:
                 respuesta = (
@@ -924,6 +959,7 @@ def conversar(
                 escalamiento,
             )
 
+        # Análisis para búsquedas de productos
         tipo, confianza_tipo = detectar_tipo_producto(mensaje)
         estado["tipo_producto"] = tipo
         estado["confianza_tipo"] = confianza_tipo
@@ -934,6 +970,7 @@ def conversar(
             estado["marca_definida"] = marca_valida is not None
             if marca_global and not marca_valida:
                 estado["marca_definida"] = False
+
         presupuesto = detectar_presupuesto(mensaje)
         estado["presupuesto"] = presupuesto
         estado["presupuesto_definido"] = presupuesto is not None
@@ -941,6 +978,7 @@ def conversar(
 
         pregunta_siguiente = siguiente_pregunta(estado)
         if pregunta_siguiente:
+            # Aún falta información, el bot decide preguntar
             prefijo = f"Detecté la intención **{intencion}**."
             marca_global = detectar_marca_global(mensaje)
             if tipo and marca_global and not estado.get("marca"):
@@ -959,6 +997,7 @@ def conversar(
                 "No: recopilando preferencias",
             )
     else:
+        # El cliente responde a una pregunta secundaria (Turnos subsecuentes)
         valido, confirmacion = registrar_seguimiento(mensaje, estado)
         if not valido:
             historial.append({"role": "assistant", "content": confirmacion})
@@ -971,6 +1010,7 @@ def conversar(
                 tabla_salida(pd.DataFrame()),
                 "No: recopilando preferencias",
             )
+
         pregunta_siguiente = siguiente_pregunta(estado)
         if pregunta_siguiente:
             respuesta = f"{confirmacion}\n\n{pregunta_siguiente}"
@@ -985,6 +1025,7 @@ def conversar(
                 "No: recopilando preferencias",
             )
 
+    # Si se superan todas las comprobaciones, presenta el resultado final de la búsqueda
     respuesta, productos, escalamiento = respuesta_final(estado, tono)
     historial.append({"role": "assistant", "content": respuesta})
     estado["finalizado"] = True
@@ -1002,6 +1043,7 @@ def conversar(
 def reiniciar() -> (
     tuple[list[dict[str, str]], dict[str, Any], str, str, str, pd.DataFrame, str]
 ):
+    """Resetea las cajas de texto y el historial de conversación en la Interfaz UI."""
     return (
         [],
         estado_nuevo(),
@@ -1014,10 +1056,12 @@ def reiniciar() -> (
 
 
 def copiar_ejemplo(ejemplo: str) -> str:
+    """Mueve el texto del botón 'ejemplos' a la caja de entrada del usuario."""
     return ejemplo or ""
 
 
 def construir_interfaz() -> gr.Blocks:
+    """Diseña y acomoda visualmente toda la estructura de la aplicación usando Gradio blocks."""
     assert catalogo is not None
     css = """
     .gradio-container {max-width: 1200px !important;}
@@ -1025,16 +1069,20 @@ def construir_interfaz() -> gr.Blocks:
     .nota {text-align:center; color:#4d5f55;}
     """
     with gr.Blocks(title="Asistente Kywi", css=css) as demo:
+        gr.Markdown("# Asistente inteligente de Kywi", elem_classes="titulo")
         gr.Markdown(
-            "# Asistente inteligente de atención al cliente de Kywi",
-            elem_classes="titulo",
+            f"Conversación guiada sobre {len(catalogo):,} productos. "
+            "Primero filtra el producto; luego ofrece solo marcas compatibles.",
+            elem_classes="nota",
         )
-        estado = gr.State(estado_nuevo())
+        estado = gr.State(
+            estado_nuevo()
+        )  # Aquí se almacena la "memoria" por sesión de usuario
+
         with gr.Row():
             with gr.Column(scale=4):
                 ejemplos = gr.Dropdown(
-                    choices=EJEMPLOS,
-                    label="Caso preparado (opcional)",
+                    choices=EJEMPLOS, label="Caso preparado (opcional)"
                 )
                 mensaje = gr.Textbox(
                     label="Mensaje del cliente",
@@ -1049,6 +1097,7 @@ def construir_interfaz() -> gr.Blocks:
                 with gr.Row():
                     enviar = gr.Button("Enviar mensaje", variant="primary")
                     nuevo = gr.Button("Nueva conversación")
+
             with gr.Column(scale=7):
                 conversacion = gr.Chatbot(
                     label="Conversación", type="messages", height=500
@@ -1057,8 +1106,10 @@ def construir_interfaz() -> gr.Blocks:
                     intencion = gr.Textbox(label="Intención conservada")
                     sentimiento = gr.Textbox(label="Sentimiento")
                 escalamiento = gr.Textbox(label="Escalamiento")
+
         productos = gr.Dataframe(label="Productos filtrados", interactive=False)
 
+        # Enlace de eventos (cuando el usuario hace clic o 'enter', se llama a las funciones backend)
         ejemplos.change(copiar_ejemplo, inputs=ejemplos, outputs=mensaje)
         for evento in [enviar.click, mensaje.submit]:
             evento(
@@ -1086,10 +1137,12 @@ def construir_interfaz() -> gr.Blocks:
                 escalamiento,
             ],
         )
+
     return demo
 
 
 def main() -> None:
+    """Punto de entrada de la app: Carga datos, enciende modelos y levanta el servidor web."""
     cargar_catalogo()
     iniciar_modelos()
     demo = construir_interfaz()
