@@ -1060,25 +1060,70 @@ def copiar_ejemplo(ejemplo: str) -> str:
     return ejemplo or ""
 
 
+def guardar_nuevo_producto(
+    nombre: str, marca: str, tipo: str, cat: str, precio: float, enlace: str
+) -> str:
+    """Añade un registro al CSV alineando correctamente todas las columnas."""
+    if not nombre or precio is None or precio <= 0:
+        return "⚠️ Error: El nombre y el precio mayor a 0 son obligatorios."
+
+    try:
+        # 1. Leemos el catálogo actual para conservar todas las columnas de la estructura
+        df_actual = pd.read_csv(CATALOGO_PATH, sep=";", encoding="utf-8-sig", dtype=str)
+
+        # 2. Calculamos el siguiente número (Num) basado en la cantidad de filas
+        siguiente_num = str(len(df_actual) + 1)
+
+        # 3. Creamos el nuevo registro especificando exactamente el nombre de las columnas clave
+        nuevo_registro = {
+            "Num": siguiente_num,
+            "Nombre Producto": nombre.strip(),
+            "Marca": marca.strip() if marca else "Sin marca",
+            "Categoría Normalizada": cat.strip() if cat else "General",
+            "Subcategoría": "General",
+            "Tipo Producto": tipo.strip() if tipo else "General",
+            "Es Producto Principal": "si",
+            "Precio USD": f"{float(precio):.2f}",
+            "Texto Búsqueda": nombre.strip(),
+            "Enlace Web": enlace.strip() if enlace else "https://www.kywi.com.ec/",
+            "Disponibilidad": "Disponible en demostración",
+            "Descripción y Especificaciones": "Agregado manualmente mediante interfaz.",
+        }
+
+        # 4. Convertimos a DataFrame y concatenamos (Pandas llenará con NaN las columnas que no enviamos)
+        nueva_fila_df = pd.DataFrame([nuevo_registro])
+        df_actualizado = pd.concat([df_actual, nueva_fila_df], ignore_index=True)
+
+        # 5. Sobrescribimos el CSV con la estructura perfecta
+        df_actualizado.to_csv(CATALOGO_PATH, index=False, sep=";", encoding="utf-8-sig")
+
+        # 6. Recargamos la memoria (TF-IDF) del bot
+        cargar_catalogo()
+        return f"✅ ¡Éxito! '{nombre}' (ID: {siguiente_num}) se agregó al catálogo y está listo para consultarse."
+    except Exception as e:
+        return f"❌ Error al guardar en el archivo CSV: {str(e)}"
+
+
 def construir_interfaz() -> gr.Blocks:
-    """Diseña y acomoda visualmente toda la estructura de la aplicación usando Gradio blocks."""
+    """Diseña la aplicación con una distribución limpia de 3 columnas."""
     assert catalogo is not None
+    # Aumentamos el max-width a 1400px para que las 3 columnas entren sin aplastarse
     css = """
-    .gradio-container {max-width: 1200px !important;}
+    .gradio-container {max-width: 1400px !important;}
     .titulo {text-align:center; margin-bottom:0.2rem;}
     .nota {text-align:center; color:#4d5f55;}
     """
     with gr.Blocks(title="Asistente Kywi", css=css) as demo:
         gr.Markdown(
-            "# Proyecto 3 - Asistente inteligente de Atención al Cliente Kywi",
+            "# Proyecto 3: Asistente de Atención al Cliente de Kywi",
             elem_classes="titulo",
         )
-        estado = gr.State(
-            estado_nuevo()
-        )  # Aquí se almacena la "memoria" por sesión de usuario
+        estado = gr.State(estado_nuevo())
 
+        # Fila principal dividida en 3 columnas
         with gr.Row():
-            with gr.Column(scale=4):
+            # COLUMNA 1: Controles e inputs (Izquierda)
+            with gr.Column(scale=3):
                 ejemplos = gr.Dropdown(
                     choices=EJEMPLOS, label="Caso preparado (opcional)"
                 )
@@ -1096,7 +1141,8 @@ def construir_interfaz() -> gr.Blocks:
                     enviar = gr.Button("Enviar mensaje", variant="primary")
                     nuevo = gr.Button("Nueva conversación")
 
-            with gr.Column(scale=7):
+            # COLUMNA 2: Interfaz del Bot (Centro)
+            with gr.Column(scale=6):
                 conversacion = gr.Chatbot(
                     label="Conversación", type="messages", height=500
                 )
@@ -1105,10 +1151,35 @@ def construir_interfaz() -> gr.Blocks:
                     sentimiento = gr.Textbox(label="Sentimiento")
                 escalamiento = gr.Textbox(label="Escalamiento")
 
+            # COLUMNA 3: Formulario administrativo (Derecha)
+            with gr.Column(scale=3):
+                with gr.Accordion("➕ Agregar Nuevo Producto", open=True):
+                    nuevo_nombre = gr.Textbox(
+                        label="Nombre del Producto", placeholder="Taladro percutor..."
+                    )
+                    nueva_marca = gr.Textbox(label="Marca", placeholder="Bosch")
+                    nuevo_tipo = gr.Textbox(
+                        label="Tipo de Producto", placeholder="Taladro"
+                    )
+                    nueva_cat = gr.Textbox(label="Categoría", placeholder="Ferretería")
+                    nuevo_precio = gr.Number(
+                        label="Precio (USD)", minimum=0.1, value=10.0
+                    )
+                    nuevo_enlace = gr.Textbox(
+                        label="Enlace web", placeholder="https://..."
+                    )
+
+                    btn_guardar_producto = gr.Button(
+                        "💾 Guardar y Actualizar", variant="secondary"
+                    )
+                    mensaje_guardado = gr.Textbox(label="Estado", interactive=False)
+
+        # La tabla de productos filtrados queda abajo, ocupando todo el ancho
         productos = gr.Dataframe(label="Productos filtrados", interactive=False)
 
-        # Enlace de eventos (cuando el usuario hace clic o 'enter', se llama a las funciones backend)
+        # ==================== EVENTOS ====================
         ejemplos.change(copiar_ejemplo, inputs=ejemplos, outputs=mensaje)
+
         for evento in [enviar.click, mensaje.submit]:
             evento(
                 conversar,
@@ -1123,6 +1194,7 @@ def construir_interfaz() -> gr.Blocks:
                     escalamiento,
                 ],
             )
+
         nuevo.click(
             reiniciar,
             outputs=[
@@ -1134,6 +1206,20 @@ def construir_interfaz() -> gr.Blocks:
                 productos,
                 escalamiento,
             ],
+        )
+
+        # Evento del formulario con los inputs actualizados
+        btn_guardar_producto.click(
+            fn=guardar_nuevo_producto,
+            inputs=[
+                nuevo_nombre,
+                nueva_marca,
+                nuevo_tipo,
+                nueva_cat,
+                nuevo_precio,
+                nuevo_enlace,
+            ],
+            outputs=[mensaje_guardado],
         )
 
     return demo
