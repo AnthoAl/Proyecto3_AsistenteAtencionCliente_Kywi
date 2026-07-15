@@ -28,7 +28,6 @@ from transformers import (
     pipeline,
 )
 
-
 BASE_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
 CATALOGO_PATH = BASE_DIR / "catalogo_kywi_mejorado.csv"
 POLITICAS_PATH = BASE_DIR / "politicas_kywi.txt"
@@ -178,9 +177,13 @@ def cargar_catalogo() -> None:
     global vectorizador_tipos, matriz_tipos, tabla_tipos
 
     if not CATALOGO_PATH.exists():
-        raise FileNotFoundError(f"No se encontró {CATALOGO_PATH.name} junto a la aplicación.")
+        raise FileNotFoundError(
+            f"No se encontró {CATALOGO_PATH.name} junto a la aplicación."
+        )
     if not POLITICAS_PATH.exists():
-        raise FileNotFoundError(f"No se encontró {POLITICAS_PATH.name} junto a la aplicación.")
+        raise FileNotFoundError(
+            f"No se encontró {POLITICAS_PATH.name} junto a la aplicación."
+        )
 
     catalogo = pd.read_csv(
         CATALOGO_PATH,
@@ -234,7 +237,11 @@ def cargar_catalogo() -> None:
                 "tipo": tipo,
                 "tipo_norm": normalizar(tipo),
                 "documento": " ".join(
-                    [(normalizar(tipo) + " ") * 6, normalizar(subcategorias), normalizar(ejemplos)]
+                    [
+                        (normalizar(tipo) + " ") * 6,
+                        normalizar(subcategorias),
+                        normalizar(ejemplos),
+                    ]
                 ),
                 "cantidad": len(grupo),
             }
@@ -288,16 +295,22 @@ def iniciar_modelos() -> EstadoModelos:
 
     modelos = EstadoModelos(
         question_answering=crear(
-            "question-answering", MODELOS["question_answering"], AutoModelForQuestionAnswering
+            "question-answering",
+            MODELOS["question_answering"],
+            AutoModelForQuestionAnswering,
         ),
         zero_shot=crear(
-            "zero-shot-classification", MODELOS["zero_shot"], AutoModelForSequenceClassification
+            "zero-shot-classification",
+            MODELOS["zero_shot"],
+            AutoModelForSequenceClassification,
         ),
         summarization=crear(
             "summarization", MODELOS["summarization"], AutoModelForSeq2SeqLM
         ),
         sentiment=crear(
-            "sentiment-analysis", MODELOS["sentiment"], AutoModelForSequenceClassification
+            "sentiment-analysis",
+            MODELOS["sentiment"],
+            AutoModelForSequenceClassification,
         ),
         text_generation=crear(
             "text-generation", MODELOS["text_generation"], AutoModelForCausalLM
@@ -337,10 +350,9 @@ def detectar_intencion(pregunta: str) -> tuple[str, float]:
     for intencion, indicadores in reglas:
         if any(indicador in consulta for indicador in indicadores):
             return intencion, 0.99
-    if (
-        any(palabra in consulta for palabra in ["que", "cuales", "muestra", "tienen"])
-        and any(palabra in consulta for palabra in ["tiene", "tienen", "hay", "muestra"])
-    ):
+    if any(
+        palabra in consulta for palabra in ["que", "cuales", "muestra", "tienen"]
+    ) and any(palabra in consulta for palabra in ["tiene", "tienen", "hay", "muestra"]):
         return "disponibilidad de producto", 0.99
 
     resultado = modelos.zero_shot(
@@ -354,9 +366,7 @@ def detectar_intencion(pregunta: str) -> tuple[str, float]:
 def limpiar_para_tipo(texto: str) -> str:
     consulta = normalizar(texto)
     if catalogo is not None:
-        marcas = sorted(
-            set(catalogo["marca_norm"]), key=len, reverse=True
-        )
+        marcas = sorted(set(catalogo["marca_norm"]), key=len, reverse=True)
         for marca in marcas:
             if marca:
                 consulta = re.sub(rf"\b{re.escape(marca)}\b", " ", consulta)
@@ -429,7 +439,9 @@ def marcas_disponibles(tipo: str | None, limite: int = 8) -> list[str]:
 def detectar_marca_global(texto: str) -> str | None:
     assert catalogo is not None
     consulta = normalizar(texto)
-    marcas = sorted(set(catalogo["Marca"]), key=lambda valor: len(normalizar(valor)), reverse=True)
+    marcas = sorted(
+        set(catalogo["Marca"]), key=lambda valor: len(normalizar(valor)), reverse=True
+    )
     for marca in marcas:
         marca_norm = normalizar(marca)
         if marca_norm and re.search(rf"\b{re.escape(marca_norm)}\b", consulta):
@@ -511,7 +523,13 @@ def siguiente_pregunta(estado: dict[str, Any]) -> str | None:
         estado["pregunta_pendiente"] = "tipo"
         ejemplos = [
             tipo
-            for tipo in ["Taladro", "Hidrolavadora", "Aspiradora", "Manguera", "Cafetera"]
+            for tipo in [
+                "Taladro",
+                "Hidrolavadora",
+                "Aspiradora",
+                "Manguera",
+                "Cafetera",
+            ]
             if catalogo is not None and normalizar(tipo) in set(catalogo["tipo_norm"])
         ]
         return "¿Qué tipo de producto buscas?" + (
@@ -521,7 +539,9 @@ def siguiente_pregunta(estado: dict[str, Any]) -> str | None:
     if not estado.get("marca_definida"):
         estado["pregunta_pendiente"] = "marca"
         marcas = marcas_disponibles(estado.get("tipo_producto"))
-        opciones = f" Las marcas disponibles son: {', '.join(marcas)}." if marcas else ""
+        opciones = (
+            f" Las marcas disponibles son: {', '.join(marcas)}." if marcas else ""
+        )
         return (
             f"¿Qué marca prefieres para **{estado['tipo_producto']}**?"
             f"{opciones} También puedes responder **sin preferencia**."
@@ -547,7 +567,10 @@ def registrar_seguimiento(mensaje: str, estado: dict[str, Any]) -> tuple[bool, s
     if pendiente == "tipo":
         tipo, confianza = detectar_tipo_producto(mensaje)
         if not tipo:
-            return False, "No pude identificar ese tipo de producto en el CSV. Escríbelo de otra manera."
+            return (
+                False,
+                "No pude identificar ese tipo de producto en el CSV. Escríbelo de otra manera.",
+            )
         estado["tipo_producto"] = tipo
         estado["confianza_tipo"] = confianza
         return True, f"Producto identificado: **{tipo}**."
@@ -593,14 +616,20 @@ def registrar_seguimiento(mensaje: str, estado: dict[str, Any]) -> tuple[bool, s
 def extraer_politica(titulo: str) -> str:
     patron = rf"{re.escape(titulo)}\n(.*?)(?=\n[A-ZÁÉÍÓÚÑ ]+\n|\nFUENTES OFICIALES|\Z)"
     coincidencia = re.search(patron, politicas, flags=re.DOTALL)
-    return coincidencia.group(1).strip() if coincidencia else "No encontré esa sección en las políticas cargadas."
+    return (
+        coincidencia.group(1).strip()
+        if coincidencia
+        else "No encontré esa sección en las políticas cargadas."
+    )
 
 
 def buscar_segun_estado(estado: dict[str, Any]) -> tuple[pd.DataFrame, float]:
     assert vectorizador_productos is not None
     candidatos = candidatos_del_tipo(estado.get("tipo_producto"))
     if estado.get("marca"):
-        candidatos = candidatos[candidatos["marca_norm"].eq(normalizar(estado["marca"]))]
+        candidatos = candidatos[
+            candidatos["marca_norm"].eq(normalizar(estado["marca"]))
+        ]
     if estado.get("presupuesto") is not None:
         candidatos = candidatos[
             candidatos["precio_num"].le(float(estado["presupuesto"]))
@@ -660,7 +689,11 @@ def ejecutar_auxiliares(pregunta: str, productos: pd.DataFrame) -> dict[str, Any
     """Ejecuta QA, resumen y generación sin publicar hechos generados."""
     assert modelos is not None
     if productos.empty:
-        return {"question_answering": "sin contexto", "resumen": "sin contexto", "generacion": "no publicada"}
+        return {
+            "question_answering": "sin contexto",
+            "resumen": "sin contexto",
+            "generacion": "no publicada",
+        }
     contexto = "\n".join(
         f"Producto: {fila['Nombre Producto']}. Marca: {fila['Marca']}. "
         f"Tipo: {fila['Tipo Producto']}. Precio: ${fila['precio_num']:.2f}. "
@@ -694,7 +727,9 @@ def ejecutar_auxiliares(pregunta: str, productos: pd.DataFrame) -> dict[str, Any
             do_sample=False,
             pad_token_id=modelos.text_generation.tokenizer.eos_token_id,
         )[0]["generated_text"]
-        resultado["generacion_no_publicada"] = str(generado)[len(prompt) :].strip()[:120]
+        resultado["generacion_no_publicada"] = str(generado)[len(prompt) :].strip()[
+            :120
+        ]
     except Exception as error:
         resultado["generacion_no_publicada"] = f"no disponible: {type(error).__name__}"
     return resultado
@@ -708,7 +743,9 @@ def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFram
     criterios = [f"producto: {tipo}"]
     criterios.append(f"marca: {marca}" if marca else "marca: sin preferencia")
     criterios.append(
-        f"presupuesto: hasta ${presupuesto:.2f}" if presupuesto is not None else "presupuesto: sin límite"
+        f"presupuesto: hasta ${presupuesto:.2f}"
+        if presupuesto is not None
+        else "presupuesto: sin límite"
     )
     if estado.get("uso"):
         criterios.append(f"uso: {estado['uso']}")
@@ -742,13 +779,23 @@ def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFram
         )
         if opciones:
             texto += f" Para comparar dos, prueba con: {', '.join(opciones)} o sin preferencia de marca."
-        return texto, tabla_salida(productos.head(1)), "No: faltan dos coincidencias comparables"
+        return (
+            texto,
+            tabla_salida(productos.head(1)),
+            "No: faltan dos coincidencias comparables",
+        )
 
-    limite = 3 if intencion in {"comparación de productos", "recomendación de producto"} else 10
+    limite = (
+        3
+        if intencion in {"comparación de productos", "recomendación de producto"}
+        else 10
+    )
     seleccionados = productos.head(limite)
     lineas = [f"**Criterios usados:** {'; '.join(criterios)}."]
     if tono == "Formal":
-        lineas.append("Con gusto, estas son las coincidencias registradas en el catálogo:")
+        lineas.append(
+            "Con gusto, estas son las coincidencias registradas en el catálogo:"
+        )
     else:
         lineas.append("Estas son las coincidencias reales del catálogo:")
     for _, fila in seleccionados.iterrows():
@@ -757,7 +804,9 @@ def respuesta_final(estado: dict[str, Any], tono: str) -> tuple[str, pd.DataFram
             f"Marca: {fila['Marca']}. Disponibilidad registrada: {fila['Disponibilidad']}."
         )
     if intencion == "comparación de productos":
-        lineas.append("La comparación está ordenada por precio cuando se solicita una opción económica.")
+        lineas.append(
+            "La comparación está ordenada por precio cuando se solicita una opción económica."
+        )
 
     requiere_humano = any(
         indicador in normalizar(estado.get("pregunta_inicial", ""))
@@ -794,7 +843,9 @@ def respuesta_politica(estado: dict[str, Any]) -> tuple[str, pd.DataFrame, str]:
         texto = "No encontré una política específica para esa consulta."
     else:
         texto = extraer_politica(titulo)
-    requiere = intencion == "reclamo" or "pedido" in normalizar(estado["pregunta_inicial"])
+    requiere = intencion == "reclamo" or "pedido" in normalizar(
+        estado["pregunta_inicial"]
+    )
     if requiere:
         texto += (
             "\n\n**Escalamiento:** comunícate con Kywi al 1700 150 150 o "
@@ -836,9 +887,7 @@ def conversar(
     assert modelos is not None
 
     primer_turno = (
-        not estado
-        or not estado.get("pregunta_inicial")
-        or estado.get("finalizado")
+        not estado or not estado.get("pregunta_inicial") or estado.get("finalizado")
     )
     if primer_turno:
         estado = estado_nuevo()
@@ -860,7 +909,9 @@ def conversar(
         if intencion not in INTENCIONES_PRODUCTO:
             respuesta, productos, escalamiento = respuesta_politica(estado)
             if molesto:
-                respuesta = "Lamento la situación y entiendo tu molestia.\n\n" + respuesta
+                respuesta = (
+                    "Lamento la situación y entiendo tu molestia.\n\n" + respuesta
+                )
             historial.append({"role": "assistant", "content": respuesta})
             estado["finalizado"] = True
             return (
@@ -948,9 +999,9 @@ def conversar(
     )
 
 
-def reiniciar() -> tuple[
-    list[dict[str, str]], dict[str, Any], str, str, str, pd.DataFrame, str
-]:
+def reiniciar() -> (
+    tuple[list[dict[str, str]], dict[str, Any], str, str, str, pd.DataFrame, str]
+):
     return (
         [],
         estado_nuevo(),
@@ -974,11 +1025,9 @@ def construir_interfaz() -> gr.Blocks:
     .nota {text-align:center; color:#4d5f55;}
     """
     with gr.Blocks(title="Asistente Kywi", css=css) as demo:
-        gr.Markdown("# Asistente inteligente de Kywi", elem_classes="titulo")
         gr.Markdown(
-            f"Conversación guiada sobre {len(catalogo):,} productos. "
-            "Primero filtra el producto; luego ofrece solo marcas compatibles.",
-            elem_classes="nota",
+            "# Asistente inteligente de atención al cliente de Kywi",
+            elem_classes="titulo",
         )
         estado = gr.State(estado_nuevo())
         with gr.Row():
