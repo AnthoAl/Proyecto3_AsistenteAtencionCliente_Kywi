@@ -1,15 +1,13 @@
 # Asistente interactivo de Kywi
 
-Esta versión fue reconstruida desde el CSV entregado por el usuario. Conserva sus nueve columnas originales y agrega campos derivados para que el bot filtre de forma estricta.
+Construcción de un asistente capaz de comprender la intención del cliente, mantener el contexto de la conversación y solicitar los datos faltantes antes de recomendar un producto para la compañía Kywi. El asistente se basa en un catálogo de productos y políticas de la empresa, y utiliza un modelo de lenguaje para interactuar con el usuario.
 
-## Archivos para Google Colab
+## Archivos del Proyecto (Entorno Kaggle)
 
-- `Asistente_Kywi_Interactivo_Colab.ipynb`
+- `Proyecto3_ AsistenteAtencionCliente_Kywi.ipynb`
 - `app_kywi_interactivo.py`
 - `catalogo_kywi_mejorado.csv`
 - `politicas_kywi.txt`
-
-El archivo `Catalogo_Kywi_mejorado.xlsx` permite revisar la estructura, la taxonomía y la calidad de los datos, pero no es necesario subirlo a Colab.
 
 ## Orden de filtrado
 
@@ -22,14 +20,12 @@ El archivo `Catalogo_Kywi_mejorado.xlsx` permite revisar la estructura, la taxon
 
 Si una combinación no existe, la aplicación lo indica y no amplía la búsqueda a otros artículos.
 
-## Prueba crítica
+## Ejecución en Kaggle
 
-Pregunta `Compara dos hidrolavadoras económicas` y responde `STANLEY`. La aplicación debe rechazar la marca porque no existe ninguna hidrolavadora principal STANLEY en el CSV. Las marcas disponibles son TRUPER, BOSCH, ELITE y KARCHER.
+Para facilitar la revisión y despliegue de la aplicación, los archivos fuente están enlazados a un repositorio de GitHub. El notebook se encarga de prepararlos de forma autónoma, por lo que **no es necesario subir ningún archivo manualmente**.
 
-## Ejecución
-
-1. Abre el notebook en Google Colab.
-2. Selecciona una GPU T4.
-3. Ejecuta las celdas en orden.
-4. Cuando aparezca el selector, sube juntos los tres archivos indicados.
-5. Abre el enlace de Gradio generado por la última celda.
+1. Abrir el notebook del proyecto en Kaggle.
+2. En el panel superior en el apartado Configuraciones, verificar que el acelerador gráfico sea **GPU T4 x2** (o similar) en la sección *Accelerator*.
+3. Verificar en ese mismo panel que el acceso a **Internet** esté encendido.
+4. Ejecutar las celdas secuencialmente. La celda inicial descargará automáticamente `app_kywi_interactivo.py`, `catalogo_kywi_mejorado.csv` y `politicas_kywi.txt` desde GitHub hacia el directorio de trabajo (`/kaggle/working/`).
+5. Al finalizar la ejecución de la última celda, abre el enlace público de Gradio (`Running on public URL: https://...`) para interactuar con la interfaz del asistente.
