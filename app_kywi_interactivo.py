@@ -1069,11 +1069,9 @@ def construir_interfaz() -> gr.Blocks:
     .nota {text-align:center; color:#4d5f55;}
     """
     with gr.Blocks(title="Asistente Kywi", css=css) as demo:
-        gr.Markdown("# Asistente inteligente de Kywi", elem_classes="titulo")
         gr.Markdown(
-            f"Conversación guiada sobre {len(catalogo):,} productos. "
-            "Primero filtra el producto; luego ofrece solo marcas compatibles.",
-            elem_classes="nota",
+            "# Proyecto 3 - Asistente inteligente de Atención al Cliente Kywi",
+            elem_classes="titulo",
         )
         estado = gr.State(
             estado_nuevo()
